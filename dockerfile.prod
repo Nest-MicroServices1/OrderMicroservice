@@ -1,0 +1,62 @@
+# Dependencias
+FROM node:21-alpine3.19 as deps
+
+WORKDIR /usr/src/app
+COPY package*.json ./
+
+RUN npm install
+
+
+# Builder - Construye la aplicacion
+FROM node:21-alpine3.19 as build
+
+# Pasamos la variable de la base de datos como argumento
+ARG ORDERS_DATABASE_URL
+
+# Creamos la variable de entorno y pasamos como argumento el ORDERS_DATABASE_URL
+ENV DATABASE_URL=$ORDERS_DATABASE_URL
+
+WORKDIR /usr/src/app
+
+# Copiar de deps los modulos de node
+
+COPY --from=deps /usr/src/app/node_modules ./node_modules
+
+# Copiamos todo el codigo fuente de la aplicacion
+COPY . .
+
+# Migramos las tblas de la base de datos
+RUN npx prisma migrate deploy
+
+# Generamos el cliente de prisma
+RUN npx prisma generate
+
+# Construimos la aplicacion. Crea la carpeta "dist"
+RUN npm run build
+
+# Lipieza de los modulos inecesarios
+RUN npm ci -f --only=production && npm cache clean --force
+
+
+# Crea la imagen final de Docker
+FROM node:21-alpine3.19 as prod
+
+WORKDIR /usr/src/app
+
+# Copiamos los modulos necsario para produccion
+COPY --from=build /usr/src/app/node_modules ./node_modules
+
+# Copiamos el codigo fuente. La carpeta dist
+COPY --from=build /usr/src/app/dist ./dist
+
+# Produccion 
+ENV NODE_ENV=production
+
+# Cambiamos de usuraio
+USER node
+
+# Exponemos el puerto 3000
+EXPOSE 3000
+
+# Ejecutamos la aplicacion
+CMD ["node", "dist/main.js"]
